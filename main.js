@@ -3,7 +3,15 @@ import * as CANNON from 'cannon-es';
 
 const $ = id => document.getElementById(id);
 const canvas = $('world');
-const renderer = new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+} catch (error) {
+  $('intro').classList.add('hidden');
+  $('fatal').hidden = false;
+  $('fatalMessage').textContent = 'WebGLで3D画面を作成できませんでした。ChromeまたはEdgeのハードウェアアクセラレーションとWebGLを有効にして再読み込みしてください。';
+  throw error;
+}
 renderer.setSize(innerWidth,innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.6));
 renderer.shadowMap.enabled = true;
