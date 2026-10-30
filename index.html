@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0a1426">
+  <meta name="description" content="Pens — 自分もモブも小さくなれる、ブラウザで遊べる3D物理サンドボックス。">
+  <title>PENS — Physics Playground</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="importmap">
+    {"imports":{
+      "three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+      "cannon-es":"https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+    }}
+  </script>
+</head>
+<body>
+  <canvas id="world" aria-label="Pens 3D Physics Playground"></canvas>
+  <div id="vignette"></div>
+  <div id="crosshair"><span></span><span></span></div>
+  <div id="toast" role="status"></div>
+
+  <header class="topbar">
+    <div class="identity">
+      <div class="brand-icon"><span>✳</span></div>
+      <div><strong>PENS</strong><small>PHYSICS PLAYGROUND</small></div>
+      <span class="tag">ALPHA 0.1</span>
+    </div>
+    <div class="world-state"><span class="live-dot"></span><span>MY PLAYGROUND</span><span class="slash">/</span><span id="statObjects">0 BLOCKS</span><span class="slash">/</span><span id="statScale">1.00×</span></div>
+    <div class="top-actions">
+      <button class="mini-btn" id="undoBtn" title="ひとつ戻す (Z)">↶ <span>戻す</span></button>
+      <select id="saveSlot" class="slot-select" aria-label="セーブスロット"><option value="1">SLOT 1</option><option value="2">SLOT 2</option><option value="3">SLOT 3</option></select>
+      <button class="mini-btn" id="loadBtn" title="ブラウザ内のセーブを読み込む">▣ <span>ロード</span></button>
+      <button class="mini-btn" id="saveBtn" title="ブラウザに保存">▣ <span>保存</span></button>
+      <button class="mini-btn" id="exportBtn" title="ワールドをJSONで書き出す">⇩ <span>書出</span></button>
+      <button class="mini-btn" id="importBtn" title="ワールドを読み込む">⇧ <span>読込</span></button>
+      <input id="importFile" type="file" accept=".json,application/json" hidden>
+      <button class="mini-btn danger" id="resetBtn" title="ワールドを初期化">⟲</button>
+    </div>
+  </header>
+
+  <aside class="left-panel glass">
+    <div class="eyebrow"><span class="accent-line"></span> WORLD 01 / CREATIVE</div>
+    <div class="panel-title">何でも、<br><em>小さく。</em> 大きく。</div>
+    <p class="panel-desc">世界を組み立て、物理を試し、ミニチュアの街に飛び込もう。</p>
+    <div class="separator"></div>
+    <div class="mini-stats">
+      <div><span>WORLD MODE</span><b>FREE BUILD</b></div>
+      <div><span>GRAVITY</span><b>9.8 m/s²</b></div>
+    </div>
+    <button id="spawnMobBtn" class="outline-action"><span>＋</span> フレンドリーモブを追加</button>
+    <button id="spawnBallBtn" class="outline-action"><span>◉</span> 物理ボールを発射 <kbd>Q</kbd></button>
+    <div class="separator"></div>
+    <div class="help-title">CONTROLS <button id="helpBtn">?</button></div>
+    <div class="control-grid">
+      <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>移動</span>
+      <span><kbd>SPACE</kbd></span><span>ジャンプ</span>
+      <span><kbd>1</kbd> – <kbd>5</kbd></span><span>ツール切替</span>
+      <span><kbd>左クリック</kbd></span><span>使用</span>
+      <span><kbd>ESC</kbd></span><span>マウス解除</span>
+    </div>
+    <div class="tip">マウスで視点変更。キャンバスをクリックすると視点を固定できます。</div>
+  </aside>
+
+  <aside class="right-panel glass">
+    <div class="inspector-heading"><span>INSPECTOR</span><b id="toolCounter">01 / 05</b></div>
+    <div class="tool-panel active" data-panel="build">
+      <div class="inspector-icon">▤</div>
+      <h2>ビルダーツール</h2>
+      <p>カーソルの先にブロックを置こう。小さな建築も、大きな建築も。</p>
+      <label class="field-label" for="material">MATERIAL / 素材</label>
+      <select id="material">
+        <option value="marble">ホワイト / マーブル</option><option value="stone">スレート / 石</option>
+        <option value="wood">ウッド / 木材</option><option value="mint">ミント / グラス</option>
+        <option value="pink">ピンク / グラス</option><option value="glass">シアン / ガラス</option>
+        <option value="metal">メタル / 鉄</option><option value="gold">ゴールド / 金属</option>
+      </select>
+      <label class="field-label" for="blockSize">BLOCK SIZE / ブロックサイズ</label>
+      <select id="blockSize">
+        <option value="1">1.00 — 標準</option><option value="0.5">0.50 — ハーフ</option>
+        <option value="0.25" selected>0.25 — ミニチュア</option><option value="0.1">0.10 — 極小</option>
+        <option value="2">2.00 — ビッグ</option><option value="4">4.00 — 巨大</option>
+      </select>
+      <label class="toggle-line"><input type="checkbox" id="dynamicBlock"><span>物理演算を有効にして設置</span></label>
+      <label class="field-label" for="miniPrefabSelect">MINI COLLECTION / ミニ建築コレクション</label>
+      <select id="miniPrefabSelect"><option value="-1">通常ブロックを設置</option></select>
+      <div class="inventory-hint" id="inventoryHint">ミニチュア建築を回収するとここに表示されます。</div>
+      <div class="instruction">クリック：設置　/　Shift + クリック：削除。通常サイズでミニ建築を壊すと丸ごと1アイテムに回収できます。</div>
+    </div>
+    <div class="tool-panel" data-panel="pen">
+      <div class="inspector-icon">✎</div>
+      <h2>ペンツール</h2>
+      <p>壁や地面に線を描こう。文字やイラストで世界を飾れる。</p>
+      <label class="field-label" for="inkColor">INK COLOR / ペンカラー</label><input id="inkColor" type="color" value="#fc6f96">
+      <label class="field-label" for="penWidth">WIDTH / 太さ <span id="penWidthLabel">0.05</span></label>
+      <input id="penWidth" type="range" min="0.015" max="0.18" value="0.05" step="0.005">
+      <div class="instruction">左ボタンを押したままマウスを動かすと描画します。</div>
+    </div>
+    <div class="tool-panel" data-panel="physics">
+      <div class="inspector-icon">◎</div>
+      <h2>物理ガン</h2>
+      <p>ブロックを選択して物理化。つかむ、飛ばす、落とすを試そう。</p>
+      <div class="selection-card"><small>SELECTED OBJECT</small><b id="selectedName">未選択</b></div>
+      <button class="action-button" id="makeDynamicBtn">選択物体を動かせるようにする</button>
+      <button class="outline-action full" id="freezeBtn">固定 / 解除</button>
+      <div class="instruction">クリック：選択　/　E：つかむ・放す　/　F：押し飛ばす</div>
+    </div>
+    <div class="tool-panel" data-panel="mini">
+      <div class="inspector-icon">↘</div>
+      <h2>ミニチュアツール</h2>
+      <p>自分もモブも縮小・拡大。小さな家に入って遊べる！</p>
+      <div class="scale-meter"><small>SIZE MULTIPLIER</small><strong id="scaleValue">0.25<small>×</small></strong></div>
+      <input id="sizeSlider" type="range" min="0.1" max="3" value="0.25" step="0.05">
+      <div class="range-ends"><span>0.10× / 豆粒</span><span>3.00× / 巨大</span></div>
+      <button class="action-button" id="makeTenthBtn">通常の1/10サイズになる</button>
+      <button class="outline-action full" id="applySelfBtn">スライダーの倍率を適用</button>
+      <button class="outline-action full" id="resetSelfBtn">自分を 1.00× に戻す</button>
+      <button class="outline-action full" id="newMiniGroupBtn">＋ 新しいミニ建築を始める</button>
+      <div class="mini-project" id="miniGroupStatus">ミニ建築プロジェクト：準備完了</div>
+      <div class="instruction">モブをクリックすると、そのモブを指定サイズに変更します。</div>
+    </div>
+    <div class="tool-panel" data-panel="portal">
+      <div class="inspector-icon">◉</div>
+      <h2>ポータルガン</h2>
+      <p>2つの空間を接続。プレイヤーや動くブロック、モブも通過できる。</p>
+      <div class="portal-legend"><span><i class="portal-a"></i>入口 A</span><span><i class="portal-b"></i>出口 B</span></div>
+      <button id="clearPortalsBtn" class="outline-action full">ポータルを消去</button>
+      <div class="instruction">クリックごとに A → B → A を交互に設置。近づいて通過しよう。</div>
+    </div>
+    <div class="inspector-footer"><span class="green-dot"></span><span id="statusText">READY TO CREATE</span></div>
+  </aside>
+
+  <nav class="toolbar glass" aria-label="ツール">
+    <button class="tool active" data-tool="build"><span class="tool-key">1</span><span class="tool-symbol">▤</span><b>BUILD</b></button>
+    <button class="tool" data-tool="pen"><span class="tool-key">2</span><span class="tool-symbol">✎</span><b>PEN</b></button>
+    <button class="tool" data-tool="physics"><span class="tool-key">3</span><span class="tool-symbol">◎</span><b>PHYSICS</b></button>
+    <button class="tool" data-tool="mini"><span class="tool-key">4</span><span class="tool-symbol">↘</span><b>MINIATURE</b></button>
+    <button class="tool" data-tool="portal"><span class="tool-key">5</span><span class="tool-symbol">◉</span><b>PORTAL</b></button>
+  </nav>
+
+  <div class="footer-note">PENS LAB <span>✧</span> CREATE WITHOUT LIMITS</div>
+  <div id="intro" class="intro-overlay">
+    <div class="intro-content">
+      <span class="intro-kicker">WELCOME TO YOUR OWN LITTLE UNIVERSE</span>
+      <h1>MAKE<br><em>ANYTHING.</em></h1>
+      <p>ブロックを置く。文字を描く。モブを小さくする。<br>物理と発想で遊ぶ、あなただけのサンドボックス。</p>
+      <button id="playBtn">世界に入る <span>→</span></button>
+      <small>データはこのブラウザに保存されます。マルチプレイは今後の機能です。</small>
+    </div>
+  </div>
+
+  <div id="fatal" class="fatal" hidden><h2>読み込みに失敗しました</h2><p id="fatalMessage"></p><button onclick="location.reload()">再読み込み</button></div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
