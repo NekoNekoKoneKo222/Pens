@@ -65,6 +65,8 @@ const mats = {
 const threeMats = Object.fromEntries(Object.entries(mats).map(([k,v])=>[k,new THREE.MeshStandardMaterial(v)]));
 let blockId=1,miniId=1,mobId=1;
 const blocks=[], mobs=[], strokes=[],portals=[null,null],miniInventory=[],history=[];
+const securityCameras=[],videoMonitors=[],linkLines=[];
+let nextCameraId=1,nextMonitorId=1,selectedCameraId=null,selectedMonitorId=null,linkSourceId=null,lastFeedTime=0;
 let currentMiniGroup='mini-'+(miniId++),activeTool='build',placingPrefab=-1;
 let selectedBlock=null,heldBlock=null,penDrawing=null,nextPortal=0;
 let toastTimer=null,lastSaveAt=0,lastStamp=0,portalParticles=[];
@@ -225,7 +227,7 @@ function sizeMob(mob,scale){
 }
 function seedWorld(){
   for(const b of [...blocks])removeBlock(b);
-  removeMobs();clearPortals(true);clearStrokes();
+  removeMobs();clearPortals(true);clearStrokes();clearVideoDevices();
   miniInventory.length=0;currentMiniGroup='mini-'+(miniId++);placingPrefab=-1;
   player.position.set(0,0,12);player.yVel=0;player.yaw=0;player.pitch=.3;setPlayerScale(1,true);
   // A chunky stack and an elevated build sample.
@@ -254,6 +256,9 @@ function seedWorld(){
   }
   spawnMob({x:2,y:0,z:1},1,'cat');spawnMob({x:-3,y:0,z:4},1,'robot');
   spawnMob({x:3,y:0,z:-5},1,'friend');
+  const introCam=makeSecurityCamera(new THREE.Vector3(2,1.15,0),new THREE.Vector3(0,1,0),{worldPosition:true});
+  const introMon=makeVideoMonitor(new THREE.Vector3(1.1,1.12,5),new THREE.Vector3(0,1,0),{worldPosition:true});
+  connectDevices(introCam,introMon,true);
   updateMiniStatus();refreshInventory();history.length=0;updateStats();
 }
 function updateMiniStatus(){
@@ -339,13 +344,189 @@ function clearPortals(quiet=false){
   nextPortal=0;if(!quiet)notify('ポータルを消去しました');
 }
 
+
+function createNoSignalTexture(){
+  const cvs=document.createElement('canvas');cvs.width=512;cvs.height=288;
+  const ctx=cvs.getContext('2d'),grad=ctx.createLinearGradient(0,0,0,288);
+  grad.addColorStop(0,'#132b37');grad.addColorStop(1,'#07121e');
+  ctx.fillStyle=grad;ctx.fillRect(0,0,512,288);
+  for(let y=4;y<288;y+=9){ctx.fillStyle='rgba(135,209,227,.035)';ctx.fillRect(0,y,512,2);}
+  ctx.strokeStyle='rgba(92,247,215,.35)';ctx.lineWidth=3;
+  ctx.strokeRect(18,18,476,252);
+  ctx.fillStyle='#7fdfc7';ctx.font='bold 31px monospace';ctx.textAlign='center';
+  ctx.fillText('NO SIGNAL',256,137);
+  ctx.fillStyle='#6c9dac';ctx.font='16px monospace';ctx.fillText('CAMERA NOT LINKED',256,172);
+  const tex=new THREE.CanvasTexture(cvs);tex.colorSpace=THREE.SRGBColorSpace;return tex;
+}
+const noSignalTexture=createNoSignalTexture();
+function validDeviceTransform(value){
+  return value&&Array.isArray(value.position)&&value.position.length===3&&value.position.every(Number.isFinite)
+    &&value.position.every(n=>Math.abs(n)<200)&&Array.isArray(value.rotation)
+    &&value.rotation.length===4&&value.rotation.every(Number.isFinite);
+}
+function createDeviceMesh(group,size,pos,color,material=null){
+  const mesh=new THREE.Mesh(cube,material||new THREE.MeshStandardMaterial({color,roughness:.5,metalness:.35}));
+  mesh.scale.set(...size);mesh.position.set(...pos);mesh.castShadow=true;mesh.receiveShadow=true;
+  group.add(mesh);return mesh;
+}
+function faceDevice(group,normal,isCamera){
+  const n=normal.clone().normalize();
+  if(n.y>.75){group.rotation.y=player.yaw;return;}
+  const forward=isCamera?new THREE.Vector3(0,0,-1):new THREE.Vector3(0,0,1);
+  group.quaternion.setFromUnitVectors(forward,n);
+}
+function makeSecurityCamera(point,normal,options={}){
+  if(securityCameras.length>=12){notify('カメラは12台までです');return null;}
+  const id=nextCameraId++,group=new THREE.Group();
+  const p=point.clone();
+  if(!options.worldPosition){
+    if(normal.y>.75)p.y+=1.15;
+    else p.addScaledVector(normal,.5);
+  }
+  group.position.copy(p);
+  if(options.quaternion)group.quaternion.fromArray(options.quaternion);
+  else faceDevice(group,normal,true);
+  createDeviceMesh(group,[.52,.36,.71],[0,0,0],0x354b61);
+  createDeviceMesh(group,[.56,.4,.13],[0,0,-.25],0x9eb2bd);
+  const lens=new THREE.Mesh(new THREE.CylinderGeometry(.13,.13,.11,24),new THREE.MeshStandardMaterial({color:0x122c4d,metalness:.7,roughness:.15,emissive:0x11456f,emissiveIntensity:.5}));
+  lens.rotation.x=Math.PI/2;lens.position.z=-.41;group.add(lens);
+  const led=new THREE.Mesh(new THREE.SphereGeometry(.045,12,9),new THREE.MeshBasicMaterial({color:0x69ffe0}));
+  led.position.set(.18,.16,-.27);group.add(led);
+  const stem=createDeviceMesh(group,[.11,.26,.12],[0,-.29,.17],0x758c99);
+  const cameraView=new THREE.PerspectiveCamera(70,16/9,.05,120);
+  cameraView.position.set(0,0,-.56);group.add(cameraView);
+  for(const mesh of group.children)if(mesh.isMesh)mesh.userData.cameraDeviceId=id;
+  scene.add(group);group.updateMatrixWorld(true);
+  const device={id,group,view:cameraView,target:null};
+  securityCameras.push(device);
+  notify('カメラ #'+id+' を配置しました');
+  return device;
+}
+function makeVideoMonitor(point,normal,options={}){
+  if(videoMonitors.length>=24){notify('モニターは24台までです');return null;}
+  const id=nextMonitorId++,group=new THREE.Group();
+  const p=point.clone(),grounded=normal.y>.75;
+  if(!options.worldPosition){
+    if(grounded)p.y+=1.1;
+    else p.addScaledVector(normal,.18);
+  }
+  group.position.copy(p);
+  if(options.quaternion)group.quaternion.fromArray(options.quaternion);
+  else faceDevice(group,normal,false);
+  createDeviceMesh(group,[2.04,1.32,.18],[0,0,0],0x1c303e);
+  createDeviceMesh(group,[1.99,1.28,.07],[0,0,.08],0x627989);
+  const screenMat=new THREE.MeshBasicMaterial({map:noSignalTexture,toneMapped:false,side:THREE.FrontSide});
+  const screen=new THREE.Mesh(new THREE.PlaneGeometry(1.81,1.02),screenMat);
+  screen.position.set(0,.02,.124);group.add(screen);
+  const light=new THREE.Mesh(new THREE.SphereGeometry(.028,8,6),new THREE.MeshBasicMaterial({color:0xf0ad68}));
+  light.position.set(.9,-.58,.138);group.add(light);
+  if(grounded){
+    createDeviceMesh(group,[.11,.62,.12],[0,-.97,.025],0x506979);
+    createDeviceMesh(group,[.85,.08,.45],[0,-1.27,.02],0x6a8490);
+  }
+  for(const mesh of group.children)if(mesh.isMesh)mesh.userData.monitorDeviceId=id;
+  scene.add(group);group.updateMatrixWorld(true);
+  const device={id,group,screen,screenMat,light,cameraId:null};
+  videoMonitors.push(device);
+  notify('モニター #'+id+' を配置しました');
+  return device;
+}
+function findCameraDevice(id){return securityCameras.find(c=>c.id===id);}
+function findMonitorDevice(id){return videoMonitors.find(m=>m.id===id);}
+function selectCamera(device){
+  selectedCameraId=device.id;
+  $('selectedCamName').textContent='CAM '+String(device.id).padStart(2,'0');
+  notify('カメラ #'+device.id+' を選択しました');
+}
+function selectMonitor(device){
+  selectedMonitorId=device.id;
+  $('selectedMonitorName').textContent='MONITOR '+String(device.id).padStart(2,'0')+
+    (device.cameraId?' → CAM '+device.cameraId:' / 未接続');
+  notify('モニター #'+device.id+' を選択しました');
+}
+function updateLinkInspector(){
+  const cam=findCameraDevice(linkSourceId);
+  $('linkSourceName').textContent=cam?'CAM '+String(cam.id).padStart(2,'0')+'（モニターをクリック）':'カメラを選んでください';
+}
+function disconnectMonitor(device){
+  if(!device)return;
+  device.cameraId=null;
+  device.screenMat.map=noSignalTexture;device.screenMat.needsUpdate=true;
+  device.light.material.color.set(0xf0ad68);
+  refreshLinkLines();
+  if(selectedMonitorId===device.id)selectMonitor(device);
+}
+function connectDevices(cam,mon,quiet=false){
+  if(!cam||!mon)return;
+  mon.cameraId=cam.id;
+  if(!cam.target){
+    cam.target=new THREE.WebGLRenderTarget(512,288,{depthBuffer:true,magFilter:THREE.LinearFilter,minFilter:THREE.LinearFilter});
+    cam.target.texture.colorSpace=THREE.SRGBColorSpace;
+  }
+  mon.screenMat.map=cam.target.texture;mon.screenMat.needsUpdate=true;
+  mon.light.material.color.set(0x67ffd2);
+  refreshLinkLines();
+  if(selectedMonitorId===mon.id)selectMonitor(mon);
+  if(!quiet)notify('CAM '+cam.id+' → MONITOR '+mon.id+' 接続完了！');
+}
+function refreshLinkLines(){
+  for(const line of linkLines){scene.remove(line);line.geometry.dispose();line.material.dispose();}
+  linkLines.length=0;
+  for(const mon of videoMonitors){
+    const cam=findCameraDevice(mon.cameraId);if(!cam)continue;
+    const from=cam.group.position.clone(),to=mon.group.position.clone();
+    const mesh=new THREE.Line(new THREE.BufferGeometry().setFromPoints([from,to]),new THREE.LineBasicMaterial({color:0x7cf9d8,transparent:true,opacity:.78,depthTest:false}));
+    mesh.visible=activeTool==='link';scene.add(mesh);linkLines.push(mesh);
+  }
+}
+function removeSecurityCamera(device){
+  if(!device)return;
+  for(const mon of videoMonitors)if(mon.cameraId===device.id)disconnectMonitor(mon);
+  if(device.target)device.target.dispose();
+  scene.remove(device.group);
+  const i=securityCameras.indexOf(device);if(i>=0)securityCameras.splice(i,1);
+  if(linkSourceId===device.id)linkSourceId=null;
+  if(selectedCameraId===device.id){selectedCameraId=null;$('selectedCamName').textContent='未選択';}
+  updateLinkInspector();refreshLinkLines();
+}
+function removeVideoMonitor(device){
+  if(!device)return;
+  scene.remove(device.group);device.screenMat.dispose();device.screen.geometry.dispose();
+  const i=videoMonitors.indexOf(device);if(i>=0)videoMonitors.splice(i,1);
+  if(selectedMonitorId===device.id){selectedMonitorId=null;$('selectedMonitorName').textContent='未選択';}
+  refreshLinkLines();
+}
+function clearVideoDevices(){
+  for(const mon of [...videoMonitors])removeVideoMonitor(mon);
+  for(const cam of [...securityCameras])removeSecurityCamera(cam);
+  linkSourceId=null;selectedCameraId=null;selectedMonitorId=null;
+  updateLinkInspector();lastFeedTime=0;
+}
+function updateCameraFeeds(time){
+  if(!videoMonitors.some(m=>m.cameraId)||time-lastFeedTime<1/12)return;
+  lastFeedTime=time;
+  const activeCameras=securityCameras.filter(c=>videoMonitors.some(m=>m.cameraId===c.id));
+  if(!activeCameras.length)return;
+  // Hide all screen surfaces while recording: avoids recursive monitor feedback.
+  for(const m of videoMonitors)m.screen.visible=false;
+  for(const c of activeCameras){
+    if(!c.target)continue;
+    renderer.setRenderTarget(c.target);
+    renderer.clear();
+    renderer.render(scene,c.view);
+  }
+  renderer.setRenderTarget(null);
+  for(const m of videoMonitors)m.screen.visible=true;
+}
+
 function setTool(name){
-  if(!['build','pen','physics','mini','portal'].includes(name))return;
+  if(!['build','pen','physics','mini','portal','cam','monitor','link'].includes(name))return;
   activeTool=name;selectedBlock=null;heldBlock=null;
   $('selectedName').textContent='未選択';
   document.querySelectorAll('.tool').forEach(el=>el.classList.toggle('active',el.dataset.tool===name));
   document.querySelectorAll('.tool-panel').forEach(el=>el.classList.toggle('active',el.dataset.panel===name));
-  $('toolCounter').textContent=String(['build','pen','physics','mini','portal'].indexOf(name)+1).padStart(2,'0')+' / 05';
+  $('toolCounter').textContent=String(['build','pen','physics','mini','portal','cam','monitor','link'].indexOf(name)+1).padStart(2,'0')+' / 08';
+  refreshLinkLines();
   status(name.toUpperCase()+' TOOL READY');
   preview.visible=false;
 }
@@ -360,6 +541,8 @@ function getHit(event,withMobs=true){
   const objects=blocks.map(b=>b.mesh);
   objects.push(raySurface);
   if(withMobs)for(const m of mobs)objects.push(...m.group.children);
+  for(const c of securityCameras)for(const child of c.group.children)if(child.isMesh)objects.push(child);
+  for(const m of videoMonitors)for(const child of m.group.children)if(child.isMesh)objects.push(child);
   const intersections=raycaster.intersectObjects(objects,false);
   return intersections.find(hit=>hit.distance<65)||null;
 }
@@ -414,6 +597,8 @@ function clicked(event){
   if(!hit)return;
   const block=hit.object.userData.block?findBlock(hit.object.userData.blockId):null;
   const mob=mobs.find(m=>m.id===hit.object.userData.mobId);
+  const clickedCam=securityCameras.find(c=>c.id===hit.object.userData.cameraDeviceId);
+  const clickedMonitor=videoMonitors.find(m=>m.id===hit.object.userData.monitorDeviceId);
   if(activeTool==='build'){
     if(event.shiftKey){
       if(!block)return;
@@ -439,6 +624,22 @@ function clicked(event){
     else notify('モブに照準を合わせてクリック');
   }else if(activeTool==='portal'){
     createPortal(nextPortal,hit.point,hitNormal(hit));
+  }else if(activeTool==='cam'){
+    const c=clickedCam||makeSecurityCamera(hit.point,hitNormal(hit));
+    if(c)selectCamera(c);
+  }else if(activeTool==='monitor'){
+    const m=clickedMonitor||makeVideoMonitor(hit.point,hitNormal(hit));
+    if(m)selectMonitor(m);
+  }else if(activeTool==='link'){
+    if(clickedCam){linkSourceId=clickedCam.id;updateLinkInspector();notify('カメラ #'+clickedCam.id+' を選択。次にモニターをクリック');}
+    else if(clickedMonitor){
+      if(event.shiftKey){disconnectMonitor(clickedMonitor);notify('モニターのリンクを解除しました');}
+      else{
+        const src=securityCameras.find(c=>c.id===linkSourceId);
+        if(src)connectDevices(src,clickedMonitor);
+        else notify('先にカメラをクリックしてください');
+      }
+    }else notify('接続したいカメラかモニターを狙ってください');
   }else if(activeTool==='pen'){
     penDrawing={points:[],line:null,color:$('inkColor').value,width:Number($('penWidth').value)};
     addPenPoint(event);
@@ -489,7 +690,7 @@ function handleKeyDown(event){
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.code))event.preventDefault();
   if(event.repeat&&['KeyQ','KeyE','KeyF','KeyZ'].includes(event.code))return;
   keys.add(event.code);
-  if(/^Digit[1-5]$/.test(event.code))setTool(['build','pen','physics','mini','portal'][Number(event.code.slice(-1))-1]);
+  if(/^Digit[1-8]$/.test(event.code))setTool(['build','pen','physics','mini','portal','cam','monitor','link'][Number(event.code.slice(-1))-1]);
   if(event.code==='KeyQ')shootBall();
   if(event.code==='KeyZ'&&(event.ctrlKey||event.metaKey||!event.shiftKey))doUndo();
   if(event.code==='KeyF'&&selectedBlock&&selectedBlock.dynamic){
@@ -509,7 +710,7 @@ window.addEventListener('keydown',handleKeyDown);
 window.addEventListener('keyup',e=>keys.delete(e.code));
 window.addEventListener('blur',()=>keys.clear());
 document.querySelectorAll('.tool').forEach(btn=>btn.addEventListener('click',()=>setTool(btn.dataset.tool)));
-$('helpBtn').addEventListener('click',()=>notify('WASD移動 / SPACEジャンプ / 1～5ツール / Qボール / Eつかむ / Shift+クリック回収'));
+$('helpBtn').addEventListener('click',()=>notify('WASD移動 / SPACEジャンプ / 1～8ツール / Qボール / Eつかむ / Shift+クリック回収'));
 $('spawnMobBtn').addEventListener('click',()=>{
   const pos=player.position.clone().add(new THREE.Vector3(-Math.sin(player.yaw)*3,0,-Math.cos(player.yaw)*3));
   const mob=spawnMob({x:pos.x,y:0,z:pos.z},1);
@@ -529,7 +730,7 @@ $('clearPortalsBtn').addEventListener('click',()=>clearPortals());
 $('undoBtn').addEventListener('click',doUndo);
 $('playBtn').addEventListener('click',()=>{
   $('intro').classList.add('hidden');canvas.requestPointerLock?.().catch(()=>{});
-  notify('ワールドへようこそ！まずはツール1～5を試してみよう');
+  notify('ワールドへようこそ！まずはツール1～8を試してみよう');
 });
 window.addEventListener('resize',()=>{
   camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
@@ -544,6 +745,8 @@ function snapshot(){
     strokes:strokes.map(s=>({points:s.points,color:s.color,width:s.width})),
     mobs:mobs.map(m=>({kind:m.kind,scale:m.scale,x:m.body.position.x,y:Math.max(0,m.body.position.y-.42*m.scale),z:m.body.position.z})),
     portals:portals.map(p=>p?({point:p.point.toArray(),normal:p.normal.toArray()}):null),
+    cameras:securityCameras.map(c=>({id:c.id,position:c.group.position.toArray(),rotation:c.group.quaternion.toArray()})),
+    monitors:videoMonitors.map(m=>({position:m.group.position.toArray(),rotation:m.group.quaternion.toArray(),cameraId:m.cameraId})),
     player:{position:player.position.toArray(),scale:player.scale,yaw:player.yaw},
     miniInventory:miniInventory.map(t=>({name:t.name,parts:t.parts})),
     currentMiniGroup
@@ -566,9 +769,11 @@ function restoreWorld(data){
   if(!Array.isArray(data.blocks)||data.blocks.length>1800)throw new Error('ブロック数が不正です');
   if(!Array.isArray(data.mobs)||data.mobs.length>45)throw new Error('モブ数が不正です');
   if(!Array.isArray(data.strokes)||data.strokes.length>400)throw new Error('ペンデータ数が不正です');
+  if(data.cameras&&(!Array.isArray(data.cameras)||data.cameras.length>12))throw new Error('カメラ数が不正です');
+  if(data.monitors&&(!Array.isArray(data.monitors)||data.monitors.length>24))throw new Error('モニター数が不正です');
   // Do not modify the scene until the main format and array limits are validated.
   for(const b of [...blocks])removeBlock(b);
-  removeMobs();clearStrokes();clearPortals(true);
+  removeMobs();clearStrokes();clearPortals(true);clearVideoDevices();
   for(const ball of [...balls])removeBall(ball);
   miniInventory.length=0;history.length=0;heldBlock=null;selectedBlock=null;
   for(const d of data.blocks){
@@ -599,6 +804,19 @@ function restoreWorld(data){
       createPortal(i,p.clone().addScaledVector(n,-.065),n);
     }
   }
+  const restoredCameras=new Map();
+  if(Array.isArray(data.cameras))for(const c of data.cameras){
+    if(!validDeviceTransform(c))continue;
+    const created=makeSecurityCamera(new THREE.Vector3(...c.position),new THREE.Vector3(0,1,0),{worldPosition:true,quaternion:c.rotation});
+    if(created)restoredCameras.set(c.id,created);
+  }
+  if(Array.isArray(data.monitors))for(const m of data.monitors){
+    if(!validDeviceTransform(m))continue;
+    const monitor=makeVideoMonitor(new THREE.Vector3(...m.position),new THREE.Vector3(0,1,0),{worldPosition:true,quaternion:m.rotation});
+    const source=restoredCameras.get(m.cameraId);
+    if(monitor&&source)connectDevices(source,monitor,true);
+  }
+  refreshLinkLines();
   if(data.player&&Array.isArray(data.player.position)&&data.player.position.length===3&&data.player.position.every(Number.isFinite)){
     const p=new THREE.Vector3(...data.player.position);
     if(p.length()<190)player.position.copy(p);
@@ -789,8 +1007,38 @@ function frame(){
       preview.material.color.set(placingPrefab>=0?'#ffcb83':'#b5fce4');
     }
   }
+  updateCameraFeeds(time);
   renderer.render(scene,camera);
 }
+
+function rotateSelectedCamera(yaw=0,pitch=0){
+  const cam=findCameraDevice(selectedCameraId);
+  if(!cam){notify('先にカメラを選択してください');return;}
+  if(yaw)cam.group.rotateY(yaw);
+  if(pitch)cam.group.rotateX(pitch);
+  cam.group.updateMatrixWorld(true);
+  notify('カメラ #'+cam.id+' の向きを変更しました');
+}
+$('cameraLeftBtn').addEventListener('click',()=>rotateSelectedCamera(-Math.PI/4,0));
+$('cameraRightBtn').addEventListener('click',()=>rotateSelectedCamera(Math.PI/4,0));
+$('cameraUpBtn').addEventListener('click',()=>rotateSelectedCamera(0,Math.PI/12));
+$('cameraDownBtn').addEventListener('click',()=>rotateSelectedCamera(0,-Math.PI/12));
+$('removeCamBtn').addEventListener('click',()=>{
+  const cam=findCameraDevice(selectedCameraId);
+  if(!cam){notify('先にカメラを選択してください');return;}
+  if(confirm('カメラ #'+cam.id+' を削除しますか？接続済みモニターは未接続に戻ります。')){
+    removeSecurityCamera(cam);notify('カメラを削除しました');
+  }
+});
+$('removeMonitorBtn').addEventListener('click',()=>{
+  const mon=findMonitorDevice(selectedMonitorId);
+  if(!mon){notify('先にモニターを選択してください');return;}
+  if(confirm('モニター #'+mon.id+' を削除しますか？')){
+    removeVideoMonitor(mon);notify('モニターを削除しました');
+  }
+});
+$('clearLinkSourceBtn').addEventListener('click',()=>{linkSourceId=null;updateLinkInspector();notify('接続元を選び直してください');});
+
 try{
   const data=localStorage.getItem(SAVE_PREFIX+'1');
   if(data)restoreWorld(JSON.parse(data));else seedWorld();

@@ -24,7 +24,7 @@
     <div class="identity">
       <div class="brand-icon"><span>✳</span></div>
       <div><strong>PENS</strong><small>PHYSICS PLAYGROUND</small></div>
-      <span class="tag">ALPHA 0.1</span>
+      <span class="tag">ALPHA 0.2</span>
     </div>
     <div class="world-state"><span class="live-dot"></span><span>MY PLAYGROUND</span><span class="slash">/</span><span id="statObjects">0 BLOCKS</span><span class="slash">/</span><span id="statScale">1.00×</span></div>
     <div class="top-actions">
@@ -127,6 +127,37 @@
       <button id="clearPortalsBtn" class="outline-action full">ポータルを消去</button>
       <div class="instruction">クリックごとに A → B → A を交互に設置。近づいて通過しよう。</div>
     </div>
+    <div class="tool-panel" data-panel="cam">
+      <div class="inspector-icon">◈</div>
+      <h2>カメラツール</h2>
+      <p>ワールド内に監視カメラを設置。映像はリンクしたモニターへリアルタイムに送信されます。</p>
+      <div class="selection-card"><small>CAMERA / 選択中</small><b id="selectedCamName">未選択</b></div>
+      <div class="device-direction">
+        <button id="cameraLeftBtn" title="カメラを左へ45°">↶ 左へ</button>
+        <button id="cameraRightBtn" title="カメラを右へ45°">右へ ↷</button>
+        <button id="cameraUpBtn" title="カメラを上へ15°">↑ 上へ</button>
+        <button id="cameraDownBtn" title="カメラを下へ15°">↓ 下へ</button>
+      </div>
+      <button class="outline-action full" id="removeCamBtn">選択したカメラを削除</button>
+      <div class="instruction">6：ツール切替　/　クリック：カメラを設置・選択。設置後に向きを調整できます。</div>
+    </div>
+    <div class="tool-panel" data-panel="monitor">
+      <div class="inspector-icon">▣</div>
+      <h2>モニターツール</h2>
+      <p>モニターを建築物や地面に配置。カメラをリンクすると、その場の3D映像が画面に映ります。</p>
+      <div class="selection-card"><small>MONITOR / 選択中</small><b id="selectedMonitorName">未選択</b></div>
+      <button class="outline-action full" id="removeMonitorBtn">選択したモニターを削除</button>
+      <div class="instruction">7：ツール切替　/　クリック：モニターを設置・選択。</div>
+    </div>
+    <div class="tool-panel" data-panel="link">
+      <div class="inspector-icon">⌁</div>
+      <h2>リンクツール</h2>
+      <p>カメラとモニターをつなげて映像を共有。1台のカメラから複数のモニターへ出力できます。</p>
+      <div class="link-steps"><div><b>01</b><span>カメラをクリックして選択</span></div><div><b>02</b><span>モニターをクリックして接続</span></div></div>
+      <div class="selection-card"><small>LINK SOURCE / 接続元</small><b id="linkSourceName">カメラを選んでください</b></div>
+      <button class="outline-action full" id="clearLinkSourceBtn">接続元を選び直す</button>
+      <div class="instruction">8：リンクツール　/　クリック：接続。Shift + モニタークリック：リンク解除。接続線はリンクツール中に表示されます。</div>
+    </div>
     <div class="inspector-footer"><span class="green-dot"></span><span id="statusText">READY TO CREATE</span></div>
   </aside>
 
@@ -136,6 +167,9 @@
     <button class="tool" data-tool="physics"><span class="tool-key">3</span><span class="tool-symbol">◎</span><b>PHYSICS</b></button>
     <button class="tool" data-tool="mini"><span class="tool-key">4</span><span class="tool-symbol">↘</span><b>MINIATURE</b></button>
     <button class="tool" data-tool="portal"><span class="tool-key">5</span><span class="tool-symbol">◉</span><b>PORTAL</b></button>
+    <button class="tool" data-tool="cam"><span class="tool-key">6</span><span class="tool-symbol">◈</span><b>CAMERA</b></button>
+    <button class="tool" data-tool="monitor"><span class="tool-key">7</span><span class="tool-symbol">▣</span><b>MONITOR</b></button>
+    <button class="tool" data-tool="link"><span class="tool-key">8</span><span class="tool-symbol">⌁</span><b>LINK</b></button>
   </nav>
 
   <div class="footer-note">PENS LAB <span>✧</span> CREATE WITHOUT LIMITS</div>
@@ -143,9 +177,9 @@
     <div class="intro-content">
       <span class="intro-kicker">WELCOME TO YOUR OWN LITTLE UNIVERSE</span>
       <h1>MAKE<br><em>ANYTHING.</em></h1>
-      <p>ブロックを置く。文字を描く。モブを小さくする。<br>物理と発想で遊ぶ、あなただけのサンドボックス。</p>
+      <p>ブロックを置く。文字を描く。カメラの映像をモニターへ送る。<br>物理と発想で遊ぶ、あなただけのサンドボックス。</p>
       <button id="playBtn">世界に入る <span>→</span></button>
-      <small>データはこのブラウザに保存されます。マルチプレイは今後の機能です。</small>
+      <small>データはこのブラウザに保存されます。カメラとモニターはツール6～8で設置・接続できます。</small>
     </div>
   </div>
 
