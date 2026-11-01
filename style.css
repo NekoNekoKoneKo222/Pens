@@ -8,3 +8,8 @@
 .toolbar .tool{width:77px}
 @media(max-width:900px){.toolbar{gap:1px;padding:5px}.toolbar .tool{width:52px;height:67px}.toolbar .tool b{font-size:8px}.toolbar .tool-symbol{font-size:23px}}
 @media(max-width:600px){.toolbar .tool{width:12%;height:58px}.toolbar .tool-key{top:4px;left:5px}.toolbar .tool b{font-size:7px;letter-spacing:0}.toolbar .tool-symbol{font-size:20px}.right-panel{bottom:96px}}
+
+.build-device-hint{margin-top:9px;color:#8caebd;font-size:10px;line-height:1.6}
+.device-edit{display:none;margin-top:16px;border-top:1px solid rgba(255,255,255,.13);padding-top:12px}
+.device-edit.active{display:block}
+#buildPiece optgroup{background:#14293a;color:#85f4d3}

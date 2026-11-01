@@ -24,7 +24,7 @@
     <div class="identity">
       <div class="brand-icon"><span>✳</span></div>
       <div><strong>PENS</strong><small>PHYSICS PLAYGROUND</small></div>
-      <span class="tag">ALPHA 0.2</span>
+      <span class="tag">ALPHA 0.3</span>
     </div>
     <div class="world-state"><span class="live-dot"></span><span>MY PLAYGROUND</span><span class="slash">/</span><span id="statObjects">0 BLOCKS</span><span class="slash">/</span><span id="statScale">1.00×</span></div>
     <div class="top-actions">
@@ -68,6 +68,25 @@
       <div class="inspector-icon">▤</div>
       <h2>ビルダーツール</h2>
       <p>カーソルの先にブロックを置こう。小さな建築も、大きな建築も。</p>
+      <label class="field-label" for="buildPiece">BUILD ITEM / 設置するもの</label>
+      <select id="buildPiece">
+        <optgroup label="建築"><option value="block">通常ブロック</option></optgroup>
+        <optgroup label="装置"><option value="camera">監視カメラ</option><option value="monitor">映像モニター</option><option value="laser">レーザー発射器</option><option value="receiver">レーザー受信機</option></optgroup>
+        <optgroup label="レッドストーン回路"><option value="switch">スイッチ</option><option value="wire">信号ワイヤー</option><option value="lamp">信号ランプ</option><option value="and">ANDゲート</option><option value="not">NOTゲート</option><option value="repeater">リピーター</option></optgroup>
+      </select>
+      <div class="build-device-hint" id="buildPieceHelp">ブロックを設置します。部品を変更すると機械や回路を作れます。</div>
+      <div class="device-edit" id="cameraEditSection">
+        <div class="selection-card"><small>CAMERA / 選択中</small><b id="selectedCamName">未選択</b></div>
+        <div class="device-direction">
+          <button id="cameraLeftBtn">↶ 左へ</button><button id="cameraRightBtn">右へ ↷</button>
+          <button id="cameraUpBtn">↑ 上へ</button><button id="cameraDownBtn">↓ 下へ</button>
+        </div>
+        <button class="outline-action full" id="removeCamBtn">選択カメラを削除</button>
+      </div>
+      <div class="device-edit" id="monitorEditSection">
+        <div class="selection-card"><small>MONITOR / 選択中</small><b id="selectedMonitorName">未選択</b></div>
+        <button class="outline-action full" id="removeMonitorBtn">選択モニターを削除</button>
+      </div>
       <label class="field-label" for="material">MATERIAL / 素材</label>
       <select id="material">
         <option value="marble">ホワイト / マーブル</option><option value="stone">スレート / 石</option>
@@ -127,27 +146,21 @@
       <button id="clearPortalsBtn" class="outline-action full">ポータルを消去</button>
       <div class="instruction">クリックごとに A → B → A を交互に設置。近づいて通過しよう。</div>
     </div>
-    <div class="tool-panel" data-panel="cam">
-      <div class="inspector-icon">◈</div>
-      <h2>カメラツール</h2>
-      <p>ワールド内に監視カメラを設置。映像はリンクしたモニターへリアルタイムに送信されます。</p>
-      <div class="selection-card"><small>CAMERA / 選択中</small><b id="selectedCamName">未選択</b></div>
-      <div class="device-direction">
-        <button id="cameraLeftBtn" title="カメラを左へ45°">↶ 左へ</button>
-        <button id="cameraRightBtn" title="カメラを右へ45°">右へ ↷</button>
-        <button id="cameraUpBtn" title="カメラを上へ15°">↑ 上へ</button>
-        <button id="cameraDownBtn" title="カメラを下へ15°">↓ 下へ</button>
-      </div>
-      <button class="outline-action full" id="removeCamBtn">選択したカメラを削除</button>
-      <div class="instruction">6：ツール切替　/　クリック：カメラを設置・選択。設置後に向きを調整できます。</div>
+    <div class="tool-panel" data-panel="wire">
+      <div class="inspector-icon">⌁</div>
+      <h2>回路配線ツール</h2>
+      <p>レッドストーン風の装置同士を配線で接続します。近くに置いた装置とワイヤーは自動でも接続します。</p>
+      <div class="link-steps"><div><b>01</b><span>回路部品をクリックして選択</span></div><div><b>02</b><span>次の部品をクリックして配線</span></div></div>
+      <div class="selection-card"><small>WIRE SOURCE / 配線元</small><b id="wireSourceName">回路部品を選んでください</b></div>
+      <button class="outline-action full" id="clearWireSourceBtn">配線元を選び直す</button>
+      <div class="instruction">6：配線ツール。Shift + 接続先クリックで配線解除。赤く光るワイヤーは通電中です。</div>
     </div>
-    <div class="tool-panel" data-panel="monitor">
-      <div class="inspector-icon">▣</div>
-      <h2>モニターツール</h2>
-      <p>モニターを建築物や地面に配置。カメラをリンクすると、その場の3D映像が画面に映ります。</p>
-      <div class="selection-card"><small>MONITOR / 選択中</small><b id="selectedMonitorName">未選択</b></div>
-      <button class="outline-action full" id="removeMonitorBtn">選択したモニターを削除</button>
-      <div class="instruction">7：ツール切替　/　クリック：モニターを設置・選択。</div>
+    <div class="tool-panel" data-panel="signal">
+      <div class="inspector-icon">⏻</div>
+      <h2>信号操作ツール</h2>
+      <p>スイッチをクリックしてON/OFF、レーザー発射器をクリックして45°回転できます。信号は配線・ゲートを通って装置に届きます。</p>
+      <div class="selection-card"><small>SIGNAL / 選択中</small><b id="signalStatus">スイッチをクリック</b></div>
+      <div class="instruction">7：信号操作。スイッチ → ワイヤー → レーザー発射器、レーザー受信機 → ランプなどの仕掛けが作れます。</div>
     </div>
     <div class="tool-panel" data-panel="link">
       <div class="inspector-icon">⌁</div>
@@ -167,8 +180,8 @@
     <button class="tool" data-tool="physics"><span class="tool-key">3</span><span class="tool-symbol">◎</span><b>PHYSICS</b></button>
     <button class="tool" data-tool="mini"><span class="tool-key">4</span><span class="tool-symbol">↘</span><b>MINIATURE</b></button>
     <button class="tool" data-tool="portal"><span class="tool-key">5</span><span class="tool-symbol">◉</span><b>PORTAL</b></button>
-    <button class="tool" data-tool="cam"><span class="tool-key">6</span><span class="tool-symbol">◈</span><b>CAMERA</b></button>
-    <button class="tool" data-tool="monitor"><span class="tool-key">7</span><span class="tool-symbol">▣</span><b>MONITOR</b></button>
+    <button class="tool" data-tool="wire"><span class="tool-key">6</span><span class="tool-symbol">⌁</span><b>WIRE</b></button>
+    <button class="tool" data-tool="signal"><span class="tool-key">7</span><span class="tool-symbol">⏻</span><b>SIGNAL</b></button>
     <button class="tool" data-tool="link"><span class="tool-key">8</span><span class="tool-symbol">⌁</span><b>LINK</b></button>
   </nav>
 
@@ -179,7 +192,7 @@
       <h1>MAKE<br><em>ANYTHING.</em></h1>
       <p>ブロックを置く。文字を描く。カメラの映像をモニターへ送る。<br>物理と発想で遊ぶ、あなただけのサンドボックス。</p>
       <button id="playBtn">世界に入る <span>→</span></button>
-      <small>データはこのブラウザに保存されます。カメラとモニターはツール6～8で設置・接続できます。</small>
+      <small>データはこのブラウザに保存されます。カメラ・モニター・レーザー・回路はビルダーツールで設置できます。</small>
     </div>
   </div>
 

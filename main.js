@@ -66,6 +66,8 @@ const threeMats = Object.fromEntries(Object.entries(mats).map(([k,v])=>[k,new TH
 let blockId=1,miniId=1,mobId=1;
 const blocks=[], mobs=[], strokes=[],portals=[null,null],miniInventory=[],history=[];
 const securityCameras=[],videoMonitors=[],linkLines=[];
+const circuitNodes=[],circuitLinks=[];
+let nextCircuitId=1,wireSourceId=null,lastCircuitTick=0;
 let nextCameraId=1,nextMonitorId=1,selectedCameraId=null,selectedMonitorId=null,linkSourceId=null,lastFeedTime=0;
 let currentMiniGroup='mini-'+(miniId++),activeTool='build',placingPrefab=-1;
 let selectedBlock=null,heldBlock=null,penDrawing=null,nextPortal=0;
@@ -227,7 +229,7 @@ function sizeMob(mob,scale){
 }
 function seedWorld(){
   for(const b of [...blocks])removeBlock(b);
-  removeMobs();clearPortals(true);clearStrokes();clearVideoDevices();
+  removeMobs();clearPortals(true);clearStrokes();clearVideoDevices();clearCircuitNodes();
   miniInventory.length=0;currentMiniGroup='mini-'+(miniId++);placingPrefab=-1;
   player.position.set(0,0,12);player.yVel=0;player.yaw=0;player.pitch=.3;setPlayerScale(1,true);
   // A chunky stack and an elevated build sample.
@@ -259,6 +261,11 @@ function seedWorld(){
   const introCam=makeSecurityCamera(new THREE.Vector3(2,1.15,0),new THREE.Vector3(0,1,0),{worldPosition:true});
   const introMon=makeVideoMonitor(new THREE.Vector3(1.1,1.12,5),new THREE.Vector3(0,1,0),{worldPosition:true});
   connectDevices(introCam,introMon,true);
+  const sw=makeCircuitNode('switch',new THREE.Vector3(-4.8,.4,7),true);
+  sw.on=true;
+  makeCircuitNode('laser',new THREE.Vector3(-4,.4,7),true);
+  makeCircuitNode('receiver',new THREE.Vector3(-4,.4,1.8),true);
+  makeCircuitNode('lamp',new THREE.Vector3(-3.2,.4,1.8),true);
   updateMiniStatus();refreshInventory();history.length=0;updateStats();
 }
 function updateMiniStatus(){
@@ -436,12 +443,14 @@ function findMonitorDevice(id){return videoMonitors.find(m=>m.id===id);}
 function selectCamera(device){
   selectedCameraId=device.id;
   $('selectedCamName').textContent='CAM '+String(device.id).padStart(2,'0');
+  updateBuildInspector();
   notify('カメラ #'+device.id+' を選択しました');
 }
 function selectMonitor(device){
   selectedMonitorId=device.id;
   $('selectedMonitorName').textContent='MONITOR '+String(device.id).padStart(2,'0')+
     (device.cameraId?' → CAM '+device.cameraId:' / 未接続');
+  updateBuildInspector();
   notify('モニター #'+device.id+' を選択しました');
 }
 function updateLinkInspector(){
@@ -519,16 +528,185 @@ function updateCameraFeeds(time){
   for(const m of videoMonitors)m.screen.visible=true;
 }
 
+
+const circuitKinds=['laser','receiver','switch','wire','lamp','and','not','repeater'];
+const circuitColors={laser:0x6a92af,receiver:0xffaa64,switch:0xffcf82,wire:0xb64c63,lamp:0xd5e1e8,and:0x74cde4,not:0xb99ef3,repeater:0x81b5ff};
+function circuitName(n){return ({laser:'レーザー発射器',receiver:'ビーム受信機',switch:'スイッチ',wire:'ワイヤー',lamp:'ランプ',and:'ANDゲート',not:'NOTゲート',repeater:'リピーター'})[n.type]||n.type;}
+function makeCircuitNode(type,position,restoring=false,rotation=null){
+  if(!circuitKinds.includes(type)||circuitNodes.length>=250){notify('回路ブロックの上限は250個です');return null;}
+  const id=nextCircuitId++,group=new THREE.Group();
+  group.position.copy(position);
+  if(rotation)group.quaternion.fromArray(rotation);else group.rotation.y=player.yaw;
+  const bodyMat=new THREE.MeshStandardMaterial({color:circuitColors[type],roughness:.43,metalness:.35,emissive:0x000000});
+  const body=new THREE.Mesh(cube,bodyMat);
+  body.scale.set(.78,type==='wire'?.13:.78,.78);
+  if(type==='wire')body.position.y=-.31;
+  group.add(body);
+  let indicator=null,beam=null,glow=null;
+  if(type==='laser'){
+    const barrel=new THREE.Mesh(new THREE.CylinderGeometry(.13,.18,.46,14),new THREE.MeshStandardMaterial({color:0x27384e,metalness:.7,roughness:.23}));
+    barrel.rotation.x=Math.PI/2;barrel.position.z=-.48;group.add(barrel);
+    indicator=new THREE.Mesh(new THREE.SphereGeometry(.115,12,8),new THREE.MeshBasicMaterial({color:0x3d0f19}));
+    indicator.position.z=-.74;group.add(indicator);
+    beam=new THREE.Mesh(new THREE.CylinderGeometry(.035,.035,1,9),new THREE.MeshBasicMaterial({color:0xff315c,transparent:true,opacity:.92,depthWrite:false}));
+    beam.visible=false;scene.add(beam);
+    glow=new THREE.PointLight(0xff3b68,.0,5);group.add(glow);
+  }else if(type==='receiver'){
+    const eye=new THREE.Mesh(new THREE.CircleGeometry(.24,22),new THREE.MeshBasicMaterial({color:0x4a121c,side:THREE.DoubleSide}));
+    eye.rotation.y=Math.PI;eye.position.z=-.403;group.add(eye);indicator=eye;
+  }else if(type==='switch'){
+    const lever=new THREE.Mesh(cube,new THREE.MeshStandardMaterial({color:0xf5f5ea,metalness:.2}));
+    lever.scale.set(.11,.52,.13);lever.position.y=.43;group.add(lever);indicator=lever;
+  }else if(type==='lamp'){
+    const bulb=new THREE.Mesh(new THREE.SphereGeometry(.32,12,9),new THREE.MeshStandardMaterial({color:0xcfe5ec,emissive:0xffcb70,emissiveIntensity:0,roughness:.28}));
+    bulb.position.y=.32;group.add(bulb);indicator=bulb;
+    glow=new THREE.PointLight(0xffdc85,0,5);glow.position.y=.42;group.add(glow);
+  }else{
+    const tile=new THREE.Mesh(cube,new THREE.MeshBasicMaterial({color:0x20354b}));
+    tile.scale.set(.42,.06,.42);tile.position.y=type==='wire'?-.2:.42;group.add(tile);
+  }
+  for(const mesh of group.children)if(mesh.isMesh){mesh.userData.circuitNodeId=id;mesh.castShadow=type!=='wire';}
+  scene.add(group);group.updateMatrixWorld(true);
+  const node={id,type,group,body,indicator,beam,glow,on:false,powered:false,received:false};
+  circuitNodes.push(node);
+  if(!restoring)notify(circuitName(node)+'を設置しました');
+  return node;
+}
+function removeCircuitNode(node){
+  if(!node)return;
+  for(const link of [...circuitLinks])if(link.a===node.id||link.b===node.id)removeCircuitLink(link);
+  if(node.beam){scene.remove(node.beam);node.beam.geometry.dispose();node.beam.material.dispose();}
+  for(const obj of node.group.children)if(obj.isMesh){
+    if(obj.geometry!==cube)obj.geometry.dispose();
+    obj.material.dispose();
+  }
+  scene.remove(node.group);
+  const i=circuitNodes.indexOf(node);if(i>=0)circuitNodes.splice(i,1);
+  if(wireSourceId===node.id)wireSourceId=null;
+  updateWireSource();
+}
+function clearCircuitNodes(){
+  for(const node of [...circuitNodes])removeCircuitNode(node);
+  wireSourceId=null;lastCircuitTick=0;
+  updateWireSource();
+}
+function addCircuitLink(idA,idB,quiet=false){
+  if(!idA||!idB||idA===idB||circuitLinks.length>=450)return;
+  if(circuitLinks.some(l=>(l.a===idA&&l.b===idB)||(l.b===idA&&l.a===idB)))return;
+  const a=circuitNodes.find(n=>n.id===idA),b=circuitNodes.find(n=>n.id===idB);
+  if(!a||!b)return;
+  const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints([a.group.position,b.group.position]),new THREE.LineBasicMaterial({color:0x783446,transparent:true,opacity:.87}));
+  scene.add(line);circuitLinks.push({a:idA,b:idB,line});
+  if(!quiet)notify('信号ケーブルを接続しました');
+}
+function removeCircuitLink(link){
+  if(!link)return;
+  scene.remove(link.line);link.line.geometry.dispose();link.line.material.dispose();
+  const i=circuitLinks.indexOf(link);if(i>=0)circuitLinks.splice(i,1);
+}
+function updateWireSource(){
+  $('wireSourceName').textContent=wireSourceId?'BLOCK '+wireSourceId+' / 次の部品をクリック':'回路部品を選んでください';
+}
+function wireClicked(node,shift){
+  if(!wireSourceId){wireSourceId=node.id;updateWireSource();notify('配線元を選択。接続先をクリック');return;}
+  if(node.id===wireSourceId){wireSourceId=null;updateWireSource();return;}
+  const old=circuitLinks.find(l=>(l.a===wireSourceId&&l.b===node.id)||(l.b===wireSourceId&&l.a===node.id));
+  if(shift){
+    if(old){removeCircuitLink(old);notify('ケーブルを外しました');}
+    else notify('この2部品はケーブル接続されていません');
+  }else addCircuitLink(wireSourceId,node.id);
+  updateWireSource();
+}
+function getCircuitNeighbors(node){
+  const near=[];
+  for(const other of circuitNodes){
+    if(other.id===node.id)continue;
+    const p=node.group.position,q=other.group.position;
+    const dx=Math.abs(p.x-q.x),dy=Math.abs(p.y-q.y),dz=Math.abs(p.z-q.z);
+    const adjacent=(dx>.05&&dx<.86&&dy<.12&&dz<.12)||
+                   (dz>.05&&dz<.86&&dx<.12&&dy<.12)||
+                   (dy>.05&&dy<.86&&dx<.12&&dz<.12);
+    const linked=circuitLinks.some(l=>(l.a===node.id&&l.b===other.id)||(l.b===node.id&&l.a===other.id));
+    if(adjacent||linked)near.push(other);
+  }
+  return near;
+}
+function updateLaserBeam(node){
+  if(!node.beam)return;
+  node.beam.visible=node.powered;
+  if(!node.powered){if(node.glow)node.glow.intensity=0;return;}
+  node.group.updateMatrixWorld(true);
+  const origin=node.group.localToWorld(new THREE.Vector3(0,0,-.76));
+  const end=node.group.localToWorld(new THREE.Vector3(0,0,-1.76));
+  const direction=end.sub(origin).normalize();
+  const laserRay=new THREE.Raycaster(origin,direction,.015,26);
+  const objects=blocks.map(b=>b.mesh);
+  for(const other of circuitNodes)if(other.id!==node.id)for(const obj of other.group.children)if(obj.isMesh)objects.push(obj);
+  const hit=laserRay.intersectObjects(objects,false)[0];
+  const length=hit?Math.max(.08,hit.distance):26;
+  if(hit){
+    const receiver=circuitNodes.find(n=>n.id===hit.object.userData.circuitNodeId);
+    if(receiver&&receiver.type==='receiver')receiver.received=true;
+  }
+  const center=origin.clone().addScaledVector(direction,length*.5);
+  node.beam.position.copy(center);
+  node.beam.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),direction);
+  node.beam.scale.set(1,length,1);
+  if(node.glow)node.glow.intensity=1.6;
+}
+function updateCircuits(time){
+  if(time-lastCircuitTick<.1)return;
+  lastCircuitTick=time;
+  for(const n of circuitNodes)n.received=false;
+  // Receivers sample what powered lasers were hitting in the previous step.
+  for(const n of circuitNodes)if(n.type==='laser')updateLaserBeam(n);
+  const neighbors=new Map(circuitNodes.map(n=>[n.id,getCircuitNeighbors(n)]));
+  let signal=new Map(circuitNodes.map(n=>[n.id,n.type==='switch'?n.on:n.type==='receiver'?n.received:false]));
+  const previous=new Map(circuitNodes.map(n=>[n.id,n.powered]));
+  const isOutput=n=>['switch','receiver','wire','and','not','repeater'].includes(n.type);
+  for(let pass=0;pass<14;pass++){
+    const next=new Map();
+    for(const n of circuitNodes){
+      const inputs=neighbors.get(n.id).filter(isOutput);
+      const num=inputs.filter(input=>signal.get(input.id)).length;
+      let value=false;
+      if(n.type==='switch')value=n.on;
+      else if(n.type==='receiver')value=n.received;
+      else if(n.type==='not')value=inputs.length>0&&num===0;
+      else if(n.type==='and')value=num>=2;
+      else if(n.type==='repeater')value=inputs.some(input=>previous.get(input.id));
+      else value=num>0;
+      next.set(n.id,value);
+    }
+    signal=next;
+  }
+  for(const n of circuitNodes){
+    n.powered=Boolean(signal.get(n.id));
+    if(n.type==='switch'&&n.indicator)n.indicator.rotation.z=n.on?-.4:.4;
+    if(n.type==='lamp'&&n.indicator)n.indicator.material.emissiveIntensity=n.powered?2.4:.0;
+    if(n.type==='lamp'&&n.glow)n.glow.intensity=n.powered?2.5:0;
+    if(n.type==='receiver'&&n.indicator)n.indicator.material.color.set(n.powered?0xff635c:0x4a121c);
+    if(n.type==='laser'&&n.indicator)n.indicator.material.color.set(n.powered?0xff2e58:0x3d0f19);
+    n.body.material.emissive.setHex(n.powered?0xff2745:0x000000);
+    n.body.material.emissiveIntensity=n.powered?.62:0;
+  }
+  for(const link of circuitLinks){
+    const a=circuitNodes.find(n=>n.id===link.a),b=circuitNodes.find(n=>n.id===link.b);
+    link.line.material.color.set(a?.powered||b?.powered?0xff4966:0x783446);
+  }
+}
+
 function setTool(name){
-  if(!['build','pen','physics','mini','portal','cam','monitor','link'].includes(name))return;
+  if(!['build','pen','physics','mini','portal','wire','signal','link'].includes(name))return;
   activeTool=name;selectedBlock=null;heldBlock=null;
   $('selectedName').textContent='未選択';
   document.querySelectorAll('.tool').forEach(el=>el.classList.toggle('active',el.dataset.tool===name));
   document.querySelectorAll('.tool-panel').forEach(el=>el.classList.toggle('active',el.dataset.panel===name));
-  $('toolCounter').textContent=String(['build','pen','physics','mini','portal','cam','monitor','link'].indexOf(name)+1).padStart(2,'0')+' / 08';
+  $('toolCounter').textContent=String(['build','pen','physics','mini','portal','wire','signal','link'].indexOf(name)+1).padStart(2,'0')+' / 08';
   refreshLinkLines();
   status(name.toUpperCase()+' TOOL READY');
   preview.visible=false;
+  if(name==='build')updateBuildInspector();
 }
 function getHit(event,withMobs=true){
   if(document.pointerLockElement===canvas||!event){
@@ -543,6 +721,7 @@ function getHit(event,withMobs=true){
   if(withMobs)for(const m of mobs)objects.push(...m.group.children);
   for(const c of securityCameras)for(const child of c.group.children)if(child.isMesh)objects.push(child);
   for(const m of videoMonitors)for(const child of m.group.children)if(child.isMesh)objects.push(child);
+  for(const n of circuitNodes)for(const child of n.group.children)if(child.isMesh)objects.push(child);
   const intersections=raycaster.intersectObjects(objects,false);
   return intersections.find(hit=>hit.distance<65)||null;
 }
@@ -599,17 +778,35 @@ function clicked(event){
   const mob=mobs.find(m=>m.id===hit.object.userData.mobId);
   const clickedCam=securityCameras.find(c=>c.id===hit.object.userData.cameraDeviceId);
   const clickedMonitor=videoMonitors.find(m=>m.id===hit.object.userData.monitorDeviceId);
+  const clickedNode=circuitNodes.find(n=>n.id===hit.object.userData.circuitNodeId);
   if(activeTool==='build'){
     if(event.shiftKey){
+      if(clickedNode){removeCircuitNode(clickedNode);notify('回路部品を削除');return;}
+      if(clickedCam){removeSecurityCamera(clickedCam);notify('カメラを撤去');return;}
+      if(clickedMonitor){removeVideoMonitor(clickedMonitor);notify('モニターを撤去');return;}
       if(!block)return;
       if(packMiniature(block))return;
-      const data=packBlock(block);
-      removeBlock(block);history.push({type:'delete',data});
+      const data=packBlock(block);removeBlock(block);history.push({type:'delete',data});
       notify('ブロックを削除しました');return;
     }
-    if(placingPrefab>=0){
-      placeMiniature(hit.point);return;
+    const piece=$('buildPiece').value;
+    if(piece==='camera'){
+      const c=clickedCam||makeSecurityCamera(hit.point,hitNormal(hit));
+      if(c)selectCamera(c);
+      return;
     }
+    if(piece==='monitor'){
+      const m=clickedMonitor||makeVideoMonitor(hit.point,hitNormal(hit));
+      if(m)selectMonitor(m);
+      return;
+    }
+    if(piece!=='block'){
+      if(clickedNode){notify('別の場所をクリックして設置してください');return;}
+      const p=blockPlacement(hit,.8);const node=makeCircuitNode(piece,p,false);
+      if(node)history.push({type:'circuit-add',id:node.id});
+      return;
+    }
+    if(placingPrefab>=0){placeMiniature(hit.point);return;}
     const size=Number($('blockSize').value)||.25;
     const p=blockPlacement(hit,size);
     const group=player.scale<=.105?currentMiniGroup:null;
@@ -624,12 +821,19 @@ function clicked(event){
     else notify('モブに照準を合わせてクリック');
   }else if(activeTool==='portal'){
     createPortal(nextPortal,hit.point,hitNormal(hit));
-  }else if(activeTool==='cam'){
-    const c=clickedCam||makeSecurityCamera(hit.point,hitNormal(hit));
-    if(c)selectCamera(c);
-  }else if(activeTool==='monitor'){
-    const m=clickedMonitor||makeVideoMonitor(hit.point,hitNormal(hit));
-    if(m)selectMonitor(m);
+  }else if(activeTool==='wire'){
+    if(clickedNode)wireClicked(clickedNode,event.shiftKey);
+    else notify('まず回路ブロックをクリックしてください');
+  }else if(activeTool==='signal'){
+    if(clickedNode&&clickedNode.type==='switch'){
+      clickedNode.on=!clickedNode.on;
+      $('signalStatus').textContent='SWITCH '+clickedNode.id+' / '+(clickedNode.on?'ON':'OFF');
+      notify(clickedNode.on?'スイッチ ON':'スイッチ OFF');
+      lastCircuitTick=0;
+    }else if(clickedNode&&clickedNode.type==='laser'){
+      clickedNode.group.rotateY(Math.PI/4);clickedNode.group.updateMatrixWorld(true);
+      notify('レーザーの向きを45°回転しました');
+    }else notify('スイッチまたはレーザー発射器をクリックしてください');
   }else if(activeTool==='link'){
     if(clickedCam){linkSourceId=clickedCam.id;updateLinkInspector();notify('カメラ #'+clickedCam.id+' を選択。次にモニターをクリック');}
     else if(clickedMonitor){
@@ -659,6 +863,7 @@ canvas.addEventListener('contextmenu',event=>event.preventDefault());
 function doUndo(){
   const item=history.pop();if(!item){notify('これ以上戻せません');return;}
   if(item.type==='add')removeBlock(findBlock(item.id));
+  if(item.type==='circuit-add')removeCircuitNode(circuitNodes.find(n=>n.id===item.id));
   if(item.type==='delete'){
     const d=item.data;makeBlock(d,d.size,d.material,d.dynamic,d.groupId);
   }
@@ -690,7 +895,7 @@ function handleKeyDown(event){
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.code))event.preventDefault();
   if(event.repeat&&['KeyQ','KeyE','KeyF','KeyZ'].includes(event.code))return;
   keys.add(event.code);
-  if(/^Digit[1-8]$/.test(event.code))setTool(['build','pen','physics','mini','portal','cam','monitor','link'][Number(event.code.slice(-1))-1]);
+  if(/^Digit[1-8]$/.test(event.code))setTool(['build','pen','physics','mini','portal','wire','signal','link'][Number(event.code.slice(-1))-1]);
   if(event.code==='KeyQ')shootBall();
   if(event.code==='KeyZ'&&(event.ctrlKey||event.metaKey||!event.shiftKey))doUndo();
   if(event.code==='KeyF'&&selectedBlock&&selectedBlock.dynamic){
@@ -747,6 +952,8 @@ function snapshot(){
     portals:portals.map(p=>p?({point:p.point.toArray(),normal:p.normal.toArray()}):null),
     cameras:securityCameras.map(c=>({id:c.id,position:c.group.position.toArray(),rotation:c.group.quaternion.toArray()})),
     monitors:videoMonitors.map(m=>({position:m.group.position.toArray(),rotation:m.group.quaternion.toArray(),cameraId:m.cameraId})),
+    circuit:circuitNodes.map(n=>({id:n.id,type:n.type,position:n.group.position.toArray(),rotation:n.group.quaternion.toArray(),on:n.on})),
+    circuitLinks:circuitLinks.map(l=>({from:l.a,to:l.b})),
     player:{position:player.position.toArray(),scale:player.scale,yaw:player.yaw},
     miniInventory:miniInventory.map(t=>({name:t.name,parts:t.parts})),
     currentMiniGroup
@@ -771,9 +978,11 @@ function restoreWorld(data){
   if(!Array.isArray(data.strokes)||data.strokes.length>400)throw new Error('ペンデータ数が不正です');
   if(data.cameras&&(!Array.isArray(data.cameras)||data.cameras.length>12))throw new Error('カメラ数が不正です');
   if(data.monitors&&(!Array.isArray(data.monitors)||data.monitors.length>24))throw new Error('モニター数が不正です');
+  if(data.circuit&&(!Array.isArray(data.circuit)||data.circuit.length>250))throw new Error('回路部品数が不正です');
+  if(data.circuitLinks&&(!Array.isArray(data.circuitLinks)||data.circuitLinks.length>450))throw new Error('配線数が不正です');
   // Do not modify the scene until the main format and array limits are validated.
   for(const b of [...blocks])removeBlock(b);
-  removeMobs();clearStrokes();clearPortals(true);clearVideoDevices();
+  removeMobs();clearStrokes();clearPortals(true);clearVideoDevices();clearCircuitNodes();
   for(const ball of [...balls])removeBall(ball);
   miniInventory.length=0;history.length=0;heldBlock=null;selectedBlock=null;
   for(const d of data.blocks){
@@ -817,6 +1026,16 @@ function restoreWorld(data){
     if(monitor&&source)connectDevices(source,monitor,true);
   }
   refreshLinkLines();
+  const circuitIdMap=new Map();
+  if(Array.isArray(data.circuit))for(const d of data.circuit){
+    if(!d||!['laser','receiver','switch','wire','lamp','and','not','repeater'].includes(d.type)||!validDeviceTransform(d))continue;
+    const node=makeCircuitNode(d.type,new THREE.Vector3(...d.position),true,d.rotation);
+    if(node){node.on=Boolean(d.on);circuitIdMap.set(d.id,node.id);}
+  }
+  if(Array.isArray(data.circuitLinks))for(const l of data.circuitLinks){
+    const a=circuitIdMap.get(l.from),b=circuitIdMap.get(l.to);
+    if(a&&b&&a!==b)addCircuitLink(a,b,true);
+  }
   if(data.player&&Array.isArray(data.player.position)&&data.player.position.length===3&&data.player.position.every(Number.isFinite)){
     const p=new THREE.Vector3(...data.player.position);
     if(p.length()<190)player.position.copy(p);
@@ -1001,15 +1220,42 @@ function frame(){
   if(activeTool==='build'&&document.querySelector('.intro-overlay.hidden')){
     const hit=getHit(null,false);
     if(hit){
-      const size=placingPrefab>=0?.8:Number($('blockSize').value)||.25;
+      const piece=$('buildPiece').value;
+      const size=piece==='block'?(placingPrefab>=0?.8:Number($('blockSize').value)||.25):.8;
       const p=blockPlacement(hit,size);
       preview.position.copy(p);preview.scale.setScalar(size*1.02);preview.visible=true;
       preview.material.color.set(placingPrefab>=0?'#ffcb83':'#b5fce4');
     }
   }
+  updateCircuits(time);
   updateCameraFeeds(time);
   renderer.render(scene,camera);
 }
+
+
+function updateBuildInspector(){
+  const piece=$('buildPiece').value;
+  $('cameraEditSection').classList.toggle('active',piece==='camera'&&!!findCameraDevice(selectedCameraId));
+  $('monitorEditSection').classList.toggle('active',piece==='monitor'&&!!findMonitorDevice(selectedMonitorId));
+  $('material').disabled=piece!=='block';
+  $('blockSize').disabled=piece!=='block';
+  $('dynamicBlock').disabled=piece!=='block';
+  $('buildPieceHelp').textContent={
+    block:'ブロックを設置。ミニ建築や物理演算にも対応。',
+    camera:'クリックでカメラを設置。既存カメラを選択すると向きを変更できます。',
+    monitor:'クリックでモニターを設置。ツール8でカメラとリンクできます。',
+    laser:'電気信号が届くと赤いビームを発射します。受信機と組み合わせよう。',
+    receiver:'レーザーが当たると信号を出します。ランプや別の装置に接続できます。',
+    switch:'ツール7でON/OFFを切り替える信号源。',
+    wire:'近くの回路ブロックと自動接続。離れたものはツール6で配線。',
+    lamp:'信号が入ると光るランプ。',
+    and:'2つ以上の入力信号がONのとき通電するゲート。',
+    not:'入力がOFFのとき通電するNOTゲート。',
+    repeater:'受け取った信号を1ステップ遅らせるリピーター。'
+  }[piece]||'建築パーツを設置できます。';
+}
+$('buildPiece').addEventListener('change',updateBuildInspector);
+$('clearWireSourceBtn').addEventListener('click',()=>{wireSourceId=null;updateWireSource();notify('配線元をリセットしました');});
 
 function rotateSelectedCamera(yaw=0,pitch=0){
   const cam=findCameraDevice(selectedCameraId);
